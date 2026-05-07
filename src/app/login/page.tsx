@@ -34,6 +34,12 @@ export default async function LoginPage({
           <AuthForm mode="login" action={signIn} next={next} />
         </div>
 
+        <p className="mt-4 text-sm">
+          <Link href="/forgot-password" className="text-gray-500 hover:text-gray-900">
+            Forgot password?
+          </Link>
+        </p>
+
         <p className="mt-6 text-sm text-gray-500">
           New here?{' '}
           <Link href="/signup" className="font-medium text-gray-900 hover:underline">

@@ -45,3 +45,6 @@ next-env.d.ts
 /data
 /.claude
 .mcp.json
+
+# debug screenshots in the project root
+/image*.png

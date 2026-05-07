@@ -67,3 +67,58 @@ export async function signIn(formData: FormData) {
   redirect(next.startsWith('/') ? next : '/');
 }
 
+export async function requestPasswordReset(formData: FormData) {
+  const email = String(formData.get('email') ?? '').trim().toLowerCase();
+
+  if (!email) {
+    redirect(`/forgot-password?error=${encodeURIComponent('Email is required.')}`);
+  }
+
+  const supabase = await createServerSupabase();
+  const origin = getOrigin(await headers());
+
+  // Don't surface "user not found" — keep the response generic so the form
+  // can't be used to enumerate which emails are registered.
+  await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${origin}/auth/confirm?next=${encodeURIComponent('/reset-password')}`,
+  });
+
+  redirect(
+    `/forgot-password?message=${encodeURIComponent(
+      'If an account exists for that email, a reset link is on its way.',
+    )}`,
+  );
+}
+
+export async function updatePassword(formData: FormData) {
+  const password = String(formData.get('password') ?? '');
+  const confirm = String(formData.get('confirm') ?? '');
+
+  if (password.length < 6) {
+    redirect(
+      `/reset-password?error=${encodeURIComponent('Password must be at least 6 characters.')}`,
+    );
+  }
+  if (password !== confirm) {
+    redirect(`/reset-password?error=${encodeURIComponent('Passwords do not match.')}`);
+  }
+
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect(
+      `/login?error=${encodeURIComponent('Reset link expired. Please request a new one.')}`,
+    );
+  }
+
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) {
+    redirect(`/reset-password?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath('/', 'layout');
+  redirect(`/?message=${encodeURIComponent('Password updated.')}`);
+}
+
