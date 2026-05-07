@@ -1,9 +1,15 @@
-import { db, USER_ID } from '@/lib/db';
+import { createServerSupabase } from '@/lib/supabase/server';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TICKER = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 
 export async function POST(request: Request) {
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return Response.json({ error: 'unauthorized' }, { status: 401 });
+
   let body: unknown;
   try {
     body = await request.json();
@@ -41,15 +47,17 @@ export async function POST(request: Request) {
   }
 
   if (type === 'SELL') {
-    const row = db
-      .prepare(
-        `SELECT
-           COALESCE(SUM(CASE WHEN type='BUY' THEN shares ELSE 0 END), 0) -
-           COALESCE(SUM(CASE WHEN type='SELL' THEN shares ELSE 0 END), 0) AS shares_owned
-         FROM trades WHERE user_id = ? AND ticker = ?`,
-      )
-      .get(USER_ID, tkr) as { shares_owned: number } | undefined;
-    const owned = row?.shares_owned ?? 0;
+    const { data: rows, error } = await supabase
+      .from('trades')
+      .select('type, shares')
+      .eq('ticker', tkr);
+    if (error) return Response.json({ error: error.message }, { status: 500 });
+    let owned = 0;
+    for (const r of rows ?? []) {
+      const s = Number(r.shares);
+      if (r.type === 'BUY') owned += s;
+      else if (r.type === 'SELL') owned -= s;
+    }
     if (sh > owned + 1e-9) {
       return Response.json(
         { error: `cannot sell ${sh} shares of ${tkr} — only ${owned} owned` },
@@ -58,13 +66,19 @@ export async function POST(request: Request) {
     }
   }
 
-  const result = db
-    .prepare(
-      `INSERT INTO trades (user_id, ticker, type, shares, price_per_share, trade_date)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(USER_ID, tkr, type, sh, pr, date);
+  const { data, error } = await supabase
+    .from('trades')
+    .insert({
+      user_id: user.id,
+      ticker: tkr,
+      type,
+      shares: sh,
+      price_per_share: pr,
+      trade_date: date,
+    })
+    .select()
+    .single();
 
-  const row = db.prepare('SELECT * FROM trades WHERE id = ?').get(result.lastInsertRowid);
-  return Response.json(row, { status: 201 });
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json(data, { status: 201 });
 }

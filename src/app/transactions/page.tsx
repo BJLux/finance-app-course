@@ -1,15 +1,28 @@
-import { db, USER_ID, type Transaction } from '@/lib/db';
+import { redirect } from 'next/navigation';
+import { createServerSupabase } from '@/lib/supabase/server';
+import type { Transaction } from '@/lib/types';
 import AddTransactionForm from '@/components/AddTransactionForm';
 import { fmtDate, fmtMoney } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
-export default function TransactionsPage() {
-  const transactions = db
-    .prepare(
-      'SELECT * FROM transactions WHERE user_id = ? ORDER BY transaction_date DESC, id DESC',
-    )
-    .all(USER_ID) as Transaction[];
+export default async function TransactionsPage() {
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/login');
+
+  const { data } = await supabase
+    .from('transactions')
+    .select('*')
+    .order('transaction_date', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  const transactions = ((data ?? []) as Transaction[]).map((t) => ({
+    ...t,
+    amount: typeof t.amount === 'string' ? Number(t.amount) : t.amount,
+  }));
 
   let income = 0;
   let expense = 0;

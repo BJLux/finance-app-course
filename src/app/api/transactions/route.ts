@@ -1,8 +1,14 @@
-import { db, USER_ID } from '@/lib/db';
+import { createServerSupabase } from '@/lib/supabase/server';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function POST(request: Request) {
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return Response.json({ error: 'unauthorized' }, { status: 401 });
+
   let body: unknown;
   try {
     body = await request.json();
@@ -31,15 +37,19 @@ export async function POST(request: Request) {
     return Response.json({ error: 'date must be in YYYY-MM-DD format' }, { status: 400 });
   }
 
-  const result = db
-    .prepare(
-      `INSERT INTO transactions (user_id, type, amount, category, transaction_date, note)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(USER_ID, type, amt, category.trim(), date, note ? String(note) : null);
+  const { data, error } = await supabase
+    .from('transactions')
+    .insert({
+      user_id: user.id,
+      type,
+      amount: amt,
+      category: category.trim(),
+      transaction_date: date,
+      note: note ? String(note) : null,
+    })
+    .select()
+    .single();
 
-  const row = db
-    .prepare('SELECT * FROM transactions WHERE id = ?')
-    .get(result.lastInsertRowid);
-  return Response.json(row, { status: 201 });
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json(data, { status: 201 });
 }

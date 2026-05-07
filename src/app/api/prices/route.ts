@@ -1,8 +1,14 @@
-import { db } from '@/lib/db';
+import { createServerSupabase } from '@/lib/supabase/server';
 
 const TICKER = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 
 export async function POST(request: Request) {
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return Response.json({ error: 'unauthorized' }, { status: 401 });
+
   let body: unknown;
   try {
     body = await request.json();
@@ -24,11 +30,13 @@ export async function POST(request: Request) {
   }
 
   const now = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO current_prices (ticker, price, updated_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT(ticker) DO UPDATE SET price = excluded.price, updated_at = excluded.updated_at`,
-  ).run(tkr, pr, now);
+  const { error } = await supabase
+    .from('current_prices')
+    .upsert(
+      { user_id: user.id, ticker: tkr, price: pr, updated_at: now },
+      { onConflict: 'user_id,ticker' },
+    );
 
+  if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ ticker: tkr, price: pr, updated_at: now });
 }

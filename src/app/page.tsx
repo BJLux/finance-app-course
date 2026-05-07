@@ -1,5 +1,7 @@
 import Link from 'next/link';
-import { db, USER_ID, type Transaction, type Trade, type User } from '@/lib/db';
+import { redirect } from 'next/navigation';
+import { createServerSupabase } from '@/lib/supabase/server';
+import type { Transaction, Trade } from '@/lib/types';
 import {
   cashBalance,
   holdingsByTicker,
@@ -11,24 +13,47 @@ import { fmtMoney, fmtPct, fmtSignedMoney, fmtDate } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
-export default function Dashboard() {
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(USER_ID) as User;
-  const transactions = db
-    .prepare(
-      'SELECT * FROM transactions WHERE user_id = ? ORDER BY transaction_date DESC, id DESC',
-    )
-    .all(USER_ID) as Transaction[];
-  const trades = db
-    .prepare('SELECT * FROM trades WHERE user_id = ? ORDER BY trade_date DESC, id DESC')
-    .all(USER_ID) as Trade[];
-  const priceRows = db
-    .prepare('SELECT ticker, price FROM current_prices')
-    .all() as { ticker: string; price: number }[];
+function n(v: number | string): number {
+  return typeof v === 'string' ? Number(v) : v;
+}
+
+export default async function Dashboard() {
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/login');
+
+  const [profileRes, txRes, tradeRes, priceRes] = await Promise.all([
+    supabase.from('profiles').select('starting_cash_balance, name').eq('id', user.id).single(),
+    supabase
+      .from('transactions')
+      .select('*')
+      .order('transaction_date', { ascending: false })
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('trades')
+      .select('*')
+      .order('trade_date', { ascending: false })
+      .order('created_at', { ascending: false }),
+    supabase.from('current_prices').select('ticker, price'),
+  ]);
+
+  const startingCash = n(profileRes.data?.starting_cash_balance ?? 0);
+  const transactions = ((txRes.data ?? []) as Transaction[]).map((t) => ({
+    ...t,
+    amount: n(t.amount),
+  }));
+  const trades = ((tradeRes.data ?? []) as Trade[]).map((t) => ({
+    ...t,
+    shares: n(t.shares),
+    price_per_share: n(t.price_per_share),
+  }));
 
   const currentPrices: Record<string, number> = {};
-  for (const row of priceRows) currentPrices[row.ticker] = row.price;
+  for (const row of priceRes.data ?? []) currentPrices[row.ticker] = n(row.price);
 
-  const cash = cashBalance(user, transactions, trades);
+  const cash = cashBalance({ starting_cash_balance: startingCash }, transactions, trades);
   const holdings = holdingsByTicker(trades);
   const valued = valuedHoldings(holdings, currentPrices);
   const portfolio = portfolioValue(valued);

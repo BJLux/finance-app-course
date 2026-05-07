@@ -1,4 +1,6 @@
-import { db, USER_ID, type Trade } from '@/lib/db';
+import { redirect } from 'next/navigation';
+import { createServerSupabase } from '@/lib/supabase/server';
+import type { Trade } from '@/lib/types';
 import { holdingsByTicker, valuedHoldings } from '@/lib/calculations';
 import AddTradeForm from '@/components/AddTradeForm';
 import AddPriceForm from '@/components/AddPriceForm';
@@ -6,18 +8,36 @@ import { fmtMoney, fmtPct, fmtShares, fmtSignedMoney } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
-export default function PortfolioPage() {
-  const trades = db
-    .prepare('SELECT * FROM trades WHERE user_id = ? ORDER BY trade_date DESC, id DESC')
-    .all(USER_ID) as Trade[];
-  const priceRows = db
-    .prepare('SELECT ticker, price, updated_at FROM current_prices')
-    .all() as { ticker: string; price: number; updated_at: string }[];
+function n(v: number | string): number {
+  return typeof v === 'string' ? Number(v) : v;
+}
+
+export default async function PortfolioPage() {
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/login');
+
+  const [tradeRes, priceRes] = await Promise.all([
+    supabase
+      .from('trades')
+      .select('*')
+      .order('trade_date', { ascending: false })
+      .order('created_at', { ascending: false }),
+    supabase.from('current_prices').select('ticker, price, updated_at'),
+  ]);
+
+  const trades = ((tradeRes.data ?? []) as Trade[]).map((t) => ({
+    ...t,
+    shares: n(t.shares),
+    price_per_share: n(t.price_per_share),
+  }));
 
   const currentPrices: Record<string, number> = {};
   const priceMeta: Record<string, string> = {};
-  for (const row of priceRows) {
-    currentPrices[row.ticker] = row.price;
+  for (const row of priceRes.data ?? []) {
+    currentPrices[row.ticker] = n(row.price);
     priceMeta[row.ticker] = row.updated_at;
   }
 

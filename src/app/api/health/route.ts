@@ -1,9 +1,17 @@
-import { db } from '@/lib/db';
+import { createServerSupabase } from '@/lib/supabase/server';
 
 export async function GET() {
-  const rows = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-    .all() as Array<{ name: string }>;
-  const tables = rows.map((row) => row.name);
-  return Response.json({ status: 'ok', tables });
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { error } = await supabase.from('profiles').select('id', { count: 'exact', head: true });
+
+  return Response.json({
+    status: error ? 'error' : 'ok',
+    db_error: error?.message ?? null,
+    authenticated: !!user,
+    user_email: user?.email ?? null,
+  });
 }

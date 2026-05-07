@@ -1,4 +1,4 @@
-import type { Trade, Transaction, User } from './db';
+import type { Trade, Transaction, Profile } from './types';
 
 export type Holding = {
   shares: number;
@@ -17,7 +17,7 @@ export type ValuedHolding = {
 };
 
 export function cashBalance(
-  user: Pick<User, 'starting_cash_balance'>,
+  user: Pick<Profile, 'starting_cash_balance'>,
   transactions: readonly Transaction[],
   trades: readonly Trade[],
 ): number {
@@ -37,9 +37,10 @@ export function cashBalance(
 // Cost basis carries through SELLs at the current average — SELLs reduce
 // shares and total_cost proportionally, so avg_cost_basis is unchanged.
 export function holdingsByTicker(trades: readonly Trade[]): Record<string, Holding> {
-  const sorted = [...trades].sort((a, b) =>
-    a.trade_date < b.trade_date ? -1 : a.trade_date > b.trade_date ? 1 : a.id - b.id,
-  );
+  const sorted = [...trades].sort((a, b) => {
+    if (a.trade_date !== b.trade_date) return a.trade_date < b.trade_date ? -1 : 1;
+    return a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0;
+  });
 
   const positions: Record<string, { shares: number; total_cost: number }> = {};
   for (const trade of sorted) {
